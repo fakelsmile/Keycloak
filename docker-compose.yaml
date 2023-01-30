@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  keycloak-postgres:
+    # Set up a PostgreSQL container
+    image: library/postgres:${KC_POSTGRES_IMAGE_TAG:-14}
+    # Set container name. If POSTGRES_CONTAINER_NAME is not set, it will use "postgres" as default
+    container_name: ${POSTGRES_CONTAINER_NAME:-postgres}
+    # Restart the container if it fails
+    restart: on-failure
+    environment:
+      # Set environment variables for Postgres container
+      POSTGRES_USER: ${KEYCLOAK_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${KEYCLOAK_POSTGRES_DB}
+    # Healthcheck for Postgres container, runs pg_isready command and checks if the postgres service is ready to accept connections
+    healthcheck:
+      test: pg_isready -d postgres
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        # The memory limit is set to 256M used for prevent consuming too many resources on the host machine
+        limits:
+          memory: 256M
+
+  keycloak:
+    # Set up Keycloak container
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak
+    # The start option tells the server to start up
+    # --auto-build option tells the server to automatically build the Keycloak image if it does not exist
+    # --db postgres option tells the server to use the Postgres database for storage
+    # --hostname-strict false option tells the server to not be strict about hostname validation
+    # --proxy edge option tells the server to use the edge proxy configuration
+    # --http-enabled true option tells the server to enable HTTP
+    # --import-realm option tells the server to import a realm from the /opt/keycloak/data/import/realms directory in the container
+    command:
+      - start --auto-build --db postgres --hostname-strict false --proxy edge --http-enabled true --import-realm
+    environment:
+      # Set environment variables for Keycloak container
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/${KEYCLOAK_POSTGRES_DB}
+      KC_DB_USERNAME: ${KEYCLOAK_POSTGRES_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD}
+      KC_DB_SCHEMA: ${KEYCLOAK_POSTGRES_SCHEMA}
+      KC_FEATURES: preview
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    # Mount local /realms directory to container's /opt/keycloak/data/import
+    volumes:
+      - /realms:/opt/keycloak/data/import
+    ports:
+      - "8080:8080"
+    depends_on:
+      - keycloak-postgres
+    # Healthcheck for Keycloak container
+    healthcheck:
+      test: [ "CMD", " curl", "-f", "http://0.0.0.0:8080/realms/master" ]
+      start_period: 10s
+      interval: 30s
+      timeout: 5s
+      retries: 3
